@@ -27,7 +27,7 @@ export const sentimentTools: Tool[] = [
       properties: {
         source: {
           type: "string",
-          enum: ["reddit", "news", "tripadvisor"],
+          enum: ["news", "reddit", "tripadvisor"],
           description: "Filter by source platform",
         },
         sentiment: {
@@ -59,7 +59,7 @@ export const sentimentTools: Tool[] = [
         },
         source: {
           type: "string",
-          enum: ["reddit", "news", "tripadvisor"],
+          enum: ["news", "reddit", "tripadvisor"],
           description: "Filter by source",
         },
       },
@@ -97,7 +97,7 @@ export const sentimentTools: Tool[] = [
         },
         source: {
           type: "string",
-          enum: ["reddit", "news", "tripadvisor"],
+          enum: ["news", "reddit", "tripadvisor"],
           description: "Filter by source platform",
         },
         days: {

@@ -43,10 +43,53 @@ interface RedditPost {
   is_self: boolean;
 }
 
+// ----------------------------------------------------------------
+// OAuth — get a client-credentials access token
+// ----------------------------------------------------------------
+let cachedToken: { token: string; expiresAt: number } | null = null;
+
+async function getAccessToken(): Promise<string> {
+  if (cachedToken && Date.now() < cachedToken.expiresAt) {
+    return cachedToken.token;
+  }
+
+  const clientId     = process.env.REDDIT_CLIENT_ID;
+  const clientSecret = process.env.REDDIT_CLIENT_SECRET;
+
+  if (!clientId || !clientSecret) {
+    throw new Error(
+      "Missing REDDIT_CLIENT_ID or REDDIT_CLIENT_SECRET in environment variables."
+    );
+  }
+
+  const response = await axios.post(
+    "https://www.reddit.com/api/v1/access_token",
+    "grant_type=client_credentials",
+    {
+      auth: { username: clientId, password: clientSecret },
+      headers: {
+        "User-Agent": USER_AGENT,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      timeout: 10000,
+    }
+  );
+
+  const token      = response.data.access_token as string;
+  const expiresIn  = (response.data.expires_in as number) * 1000;
+  cachedToken = { token, expiresAt: Date.now() + expiresIn - 60_000 };
+  return token;
+}
+
+// ----------------------------------------------------------------
+// Fetch one page of search results via OAuth API
+// ----------------------------------------------------------------
 async function fetchPage(
   query: string,
   after?: string
 ): Promise<{ posts: RedditPost[]; after?: string }> {
+  const token = await getAccessToken();
+
   const params = new URLSearchParams({
     q: query,
     sort: "new",
@@ -56,9 +99,12 @@ async function fetchPage(
   });
 
   const response = await axios.get(
-    `https://www.reddit.com/search.json?${params}`,
+    `https://oauth.reddit.com/search?${params}`,
     {
-      headers: { "User-Agent": USER_AGENT },
+      headers: {
+        "Authorization": `Bearer ${token}`,
+        "User-Agent": USER_AGENT,
+      },
       timeout: 15000,
     }
   );

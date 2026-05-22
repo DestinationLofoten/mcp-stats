@@ -32,8 +32,8 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Fetch Reddit mentions
-        run: npm run fetch:reddit -- --days 2
+      - name: Fetch news mentions
+        run: npm run fetch:news -- --days 2
 
       - name: Analyze sentiment
         run: npm run analyze:sentiment -- --limit 200
