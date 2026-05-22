@@ -1,0 +1,15 @@
+{
+  "rootFolder": {
+    "id": "1u6BiOfkPXjMuCF2iJvBfaxupRcAWiZrg",
+    "title": "nordata-dokumenter"
+  },
+  "categoryFolders": {
+    "strategi":   "1oImNg2uQEGv1a13sPaVZv1Mfndn7ogmc",
+    "rapport":    "1Gqh0JiNOe--IqrC5irAtqQiU3Eyd5che",
+    "plan":       "10SuJWDEj5_eLOfzL9Covc9xirs8VoSM_",
+    "utredning":  "1A08nVjV-C0feMDojVeGzZ7B02aGuSxeZ",
+    "statistikk": "10qHtsHLB2zz8ORpLcDXFt8iqZPBfK2WH"
+  },
+  "syncMode": "googleapis",
+  "note": "Alternativ B — npm run sync:drive:auth (én gang) → npm run sync:drive. Krever GOOGLE_CLIENT_ID + GOOGLE_CLIENT_SECRET i .env. Token lagres i .credentials/google.json."
+}

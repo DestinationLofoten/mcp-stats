@@ -1,0 +1,28 @@
+# Environment variables — never commit these
+.env
+.env.local
+.env.*
+
+# Google OAuth credentials
+.credentials/
+
+# Compiled output
+dist/
+*.js.map
+
+# Node
+node_modules/
+
+# Logs
+logs/
+*.log
+
+# Reports (generated output, not source)
+reports/
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
