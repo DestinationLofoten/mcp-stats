@@ -33,8 +33,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Fetch news mentions
+      - name: Fetch GDELT news
         run: npm run fetch:news -- --days 2
+
+      - name: Fetch RSS feeds
+        run: npm run fetch:rss -- --days 7
 
       - name: Analyze sentiment
         run: npm run analyze:sentiment -- --limit 200

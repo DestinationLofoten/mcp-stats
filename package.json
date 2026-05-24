@@ -9,6 +9,7 @@
     "fetch:all": "ts-node fetchers/run-all.ts",
     "fetch:docs": "ts-node fetchers/documents.ts",
     "fetch:news": "ts-node fetchers/gdelt.ts",
+    "fetch:rss": "ts-node fetchers/rss.ts",
     "analyze:sentiment": "ts-node fetchers/analyze-sentiment.ts",
     "sync:drive": "ts-node fetchers/sync-drive.ts",
     "sync:drive:auth": "ts-node fetchers/sync-drive.ts --auth",
@@ -29,6 +30,7 @@
     "mammoth": "^1.12.0",
     "openai": "^6.38.0",
     "pdf-parse": "^1.1.1",
+    "rss-parser": "^3.13.0",
     "tiktoken": "^1.0.22",
     "zod": "^3.23.0"
   },
