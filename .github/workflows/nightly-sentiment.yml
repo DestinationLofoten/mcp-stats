@@ -39,5 +39,10 @@ jobs:
       - name: Fetch RSS feeds
         run: npm run fetch:rss -- --days 7
 
+      - name: Fetch Google Reviews
+        env:
+          APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
+        run: npm run fetch:reviews
+
       - name: Analyze sentiment
         run: npm run analyze:sentiment -- --limit 200

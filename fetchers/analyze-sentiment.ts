@@ -26,7 +26,7 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 const EMBED_MODEL = "text-embedding-3-small";
 const ANALYSIS_MODEL = "claude-haiku-4-5-20251001";
-const BATCH_SIZE = 10; // parallel calls per round
+const BATCH_SIZE = 5; // parallel calls per round — stays under 50 req/min rate limit
 const MAX_TEXT_CHARS = 2000; // truncate long posts before sending to Claude
 
 interface RawMention {
@@ -150,9 +150,9 @@ async function main() {
     const done = Math.min(i + BATCH_SIZE, mentions.length);
     console.log(`  ${done}/${mentions.length} — ${processed} ok, ${failed} failed`);
 
-    // Brief pause between batches
+    // Pause between batches to respect 50 req/min rate limit
     if (done < mentions.length) {
-      await new Promise((r) => setTimeout(r, 300));
+      await new Promise((r) => setTimeout(r, 1500));
     }
   }
 
