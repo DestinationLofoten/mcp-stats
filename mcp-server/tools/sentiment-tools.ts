@@ -20,6 +20,7 @@ const EMBED_MODEL = "text-embedding-3-small";
 export const sentimentTools: Tool[] = [
   {
     name: "sentiment_recent",
+    annotations: { readOnlyHint: true, openWorldHint: false },
     description:
       "Get recent Lofoten mentions with sentiment scores from Reddit (and other sources as added). Returns title, summary, sentiment, score, topics, and URL. Best for 'what are people saying this week' questions.",
     inputSchema: {
@@ -41,13 +42,18 @@ export const sentimentTools: Tool[] = [
         },
         limit: {
           type: "number",
-          description: "Max results (default: 20, max: 50)",
+          description: "Max results (default: 20, max: 500)",
+        },
+        author: {
+          type: "string",
+          description: "Filter by business name (e.g. 'Paleo Arctic'). Use this to analyse one company at a time.",
         },
       },
     },
   },
   {
     name: "sentiment_summary",
+    annotations: { readOnlyHint: true, openWorldHint: false },
     description:
       "Weekly sentiment summary aggregated by source. Returns mention counts, average score, and positive/neutral/negative breakdown per week. Best for trend and time-series questions.",
     inputSchema: {
@@ -67,6 +73,7 @@ export const sentimentTools: Tool[] = [
   },
   {
     name: "sentiment_topics",
+    annotations: { readOnlyHint: true, openWorldHint: false },
     description:
       "Top topics mentioned in Lofoten content over the last 30 days, with count and sentiment breakdown per topic. Use to identify dominant themes in conversation (e.g. hiking, weather, crowding, aurora).",
     inputSchema: {
@@ -81,6 +88,7 @@ export const sentimentTools: Tool[] = [
   },
   {
     name: "sentiment_search",
+    annotations: { readOnlyHint: true, openWorldHint: true },
     description:
       "Semantic search over Lofoten mentions using natural language. More powerful than keyword search — finds mentions by meaning, not exact words. E.g. 'frustration about parking' finds posts that never use the word 'frustration'.",
     inputSchema: {
@@ -106,7 +114,7 @@ export const sentimentTools: Tool[] = [
         },
         limit: {
           type: "number",
-          description: "Max results (default: 5, max: 10)",
+          description: "Max results (default: 5, max: 50)",
         },
       },
       required: ["query"],
@@ -136,7 +144,7 @@ export async function handleSentimentTool(
 // ----------------------------------------------------------------
 async function sentimentRecent(args: Record<string, unknown>) {
   const days  = Number(args.days  ?? 7);
-  const limit = Math.min(Number(args.limit ?? 20), 50);
+  const limit = Math.min(Number(args.limit ?? 20), 500);
   const since = new Date(Date.now() - days * 86_400_000).toISOString();
 
   let query = supabase
@@ -151,6 +159,7 @@ async function sentimentRecent(args: Record<string, unknown>) {
 
   if (args.source)    query = query.eq("source",    args.source    as string);
   if (args.sentiment) query = query.eq("sentiment", args.sentiment as string);
+  if (args.author)    query = query.ilike("author", `%${args.author as string}%`);
 
   const { data, error } = await query;
   if (error) throw new Error(`sentiment_recent failed: ${error.message}`);
@@ -230,7 +239,7 @@ async function sentimentTopics(args: Record<string, unknown>) {
 // ----------------------------------------------------------------
 async function sentimentSearch(args: Record<string, unknown>) {
   const query = args.query as string;
-  const limit = Math.min(Number(args.limit ?? 5), 10);
+  const limit = Math.min(Number(args.limit ?? 5), 50);
 
   const embResponse = await openai.embeddings.create({
     model: EMBED_MODEL,
