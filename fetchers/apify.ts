@@ -53,16 +53,16 @@ function extractBusinessName(searchString: string | null): string {
 }
 
 // ----------------------------------------------------------------
-// Fetch latest successful run dataset
+// Fetch all successful run dataset IDs
 // ----------------------------------------------------------------
-async function getLatestDatasetId(): Promise<string> {
+async function getAllDatasetIds(): Promise<string[]> {
   const { data } = await axios.get(
-    `${APIFY_BASE}/acts/${ACTOR_ID}/runs?token=${APIFY_TOKEN}&limit=10&status=SUCCEEDED`,
+    `${APIFY_BASE}/acts/${ACTOR_ID}/runs?token=${APIFY_TOKEN}&limit=200&status=SUCCEEDED`,
     { timeout: 15000 }
   );
   const runs = data?.data?.items ?? [];
   if (runs.length === 0) throw new Error("No successful Apify runs found.");
-  return runs[0].defaultDatasetId as string;
+  return runs.map((r: any) => r.defaultDatasetId as string);
 }
 
 async function fetchDataset(datasetId: string): Promise<ApifyReview[]> {
@@ -113,26 +113,37 @@ async function upsertReviews(reviews: ApifyReview[]): Promise<number> {
 // Main
 // ----------------------------------------------------------------
 async function main() {
-  console.log("\n⭐ Apify Google Reviews — fetching latest dataset\n");
+  console.log("\n⭐ Apify Google Reviews — fetching all datasets\n");
 
-  const datasetId = await getLatestDatasetId();
-  console.log(`  Dataset: ${datasetId}`);
+  const datasetIds = await getAllDatasetIds();
+  console.log(`  Found ${datasetIds.length} successful run(s)\n`);
 
-  const reviews = await fetchDataset(datasetId);
-  console.log(`  Reviews in dataset: ${reviews.length}`);
+  let totalFetched = 0;
+  let totalSaved = 0;
 
-  // Summary by business
-  const byBusiness: Record<string, number> = {};
-  reviews.forEach((r) => {
-    const name = extractBusinessName(r.searchString);
-    byBusiness[name] = (byBusiness[name] ?? 0) + 1;
-  });
-  Object.entries(byBusiness).forEach(([name, count]) =>
-    console.log(`    ${name}: ${count} reviews`)
-  );
+  for (const datasetId of datasetIds) {
+    const reviews = await fetchDataset(datasetId);
+    if (reviews.length === 0) continue;
 
-  const saved = await upsertReviews(reviews);
-  console.log(`\n✅ Done — ${reviews.length} fetched, ${saved} new saved`);
+    const byBusiness: Record<string, number> = {};
+    reviews.forEach((r) => {
+      const name = extractBusinessName(r.searchString);
+      byBusiness[name] = (byBusiness[name] ?? 0) + 1;
+    });
+
+    console.log(`  Dataset ${datasetId}: ${reviews.length} reviews`);
+    Object.entries(byBusiness).forEach(([name, count]) =>
+      console.log(`    ${name}: ${count}`)
+    );
+
+    const saved = await upsertReviews(reviews);
+    console.log(`    → ${saved} new saved\n`);
+
+    totalFetched += reviews.length;
+    totalSaved += saved;
+  }
+
+  console.log(`✅ Done — ${totalFetched} fetched across all runs, ${totalSaved} new saved`);
 }
 
 main().catch((err) => {
