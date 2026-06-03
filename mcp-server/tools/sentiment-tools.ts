@@ -38,15 +38,15 @@ export const sentimentTools: Tool[] = [
         },
         days: {
           type: "number",
-          description: "Mentions from last N days (default: 7)",
+          description: "Mentions from last N days (default: 9999 = all-time). For google_reviews, omit this to get all historical reviews.",
         },
         limit: {
           type: "number",
-          description: "Max results (default: 20, max: 500)",
+          description: "Max results (default: 20, max: 500). For a full company analysis, set to 500 and use the author filter.",
         },
         author: {
           type: "string",
-          description: "Filter by business name (e.g. 'Paleo Arctic'). Use this to analyse one company at a time.",
+          description: "Filter by business name (e.g. 'Paleo Arctic'). Use this to analyse one company at a time. For a full analysis across all companies, make one call per company.",
         },
       },
     },
@@ -143,7 +143,7 @@ export async function handleSentimentTool(
 // sentiment_recent
 // ----------------------------------------------------------------
 async function sentimentRecent(args: Record<string, unknown>) {
-  const days  = Number(args.days  ?? 7);
+  const days  = Number(args.days  ?? 9999);
   const limit = Math.min(Number(args.limit ?? 20), 500);
   const since = new Date(Date.now() - days * 86_400_000).toISOString();
 
