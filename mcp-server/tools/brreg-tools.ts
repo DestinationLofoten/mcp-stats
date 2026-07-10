@@ -15,7 +15,7 @@ export const brregTools: Tool[] = [
     name: "brreg_search_companies",
     annotations: { readOnlyHint: true, openWorldHint: false },
     description:
-      "Search companies in Lofoten (Vågan, Vestvågøy, Flakstad, Moskenes, Røst, Værøy) from Brønnøysundregistrene. Filter by name, NACE industry code, or company type. Returns company details including financial data (revenue, costs, profit, assets, equity) for a given accounting year.",
+      "Search companies with registered business address in Lofoten (Vågan, Vestvågøy, Flakstad, Moskenes, Røst, Værøy) from Brønnøysundregistrene. Filter by name, NACE industry code, or company type. Returns company details including financial data (revenue, costs, profit, assets, equity) for a given accounting year.",
     inputSchema: {
       type: "object",
       properties: {
@@ -59,7 +59,7 @@ export const brregTools: Tool[] = [
     name: "brreg_company_stats",
     annotations: { readOnlyHint: true, openWorldHint: false },
     description:
-      "Get aggregate statistics about companies in Lofoten (Vågan, Vestvågøy, Flakstad, Moskenes, Røst, Værøy): counts and financial totals grouped by municipality, industry (NACE), or company type. Useful for overview reports and comparisons.",
+      "Get aggregate statistics about companies with registered business address in Lofoten (Vågan, Vestvågøy, Flakstad, Moskenes, Røst, Værøy): counts and financial totals grouped by municipality, industry (NACE), or company type. Useful for overview reports and comparisons.",
     inputSchema: {
       type: "object",
       properties: {

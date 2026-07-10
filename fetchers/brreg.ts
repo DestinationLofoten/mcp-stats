@@ -6,7 +6,7 @@
  * upserts into Supabase.
  *
  * Usage:
- *   npm run fetch:brreg                          # Vågan 2024 (defaults)
+ *   npm run fetch:brreg                          # all 6 Lofoten municipalities, 2024
  *   npm run fetch:brreg -- --kommune=1865 --year=2024
  */
 
@@ -21,6 +21,16 @@ const supabase = getSupabaseAdmin();
 
 const ENHETER_URL = "https://data.brreg.no/enhetsregisteret/api/enheter";
 const REGNSKAP_URL = "https://data.brreg.no/regnskapsregisteret/regnskap";
+
+// The 6 Lofoten municipalities
+const LOFOTEN_KOMMUNER = [
+  "1856", // Røst
+  "1857", // Værøy
+  "1859", // Flakstad
+  "1860", // Vestvågøy
+  "1865", // Vågan
+  "1874", // Moskenes
+];
 
 // ----------------------------------------------------------------
 // Types
@@ -77,8 +87,15 @@ async function fetchAllEnheter(kommunenummer: string): Promise<Enhet[]> {
   let page = 0;
 
   while (true) {
+    // Filter on business address only: the generic `kommunenummer` param also
+    // matches postal address, pulling in bankruptcy estates administered from
+    // elsewhere and entities with no business address at all.
     const { data } = await axios.get<EnheterResponse>(ENHETER_URL, {
-      params: { kommunenummer, page, size: 100 },
+      params: {
+        "forretningsadresse.kommunenummer": kommunenummer,
+        page,
+        size: 100,
+      },
       headers: { Accept: "application/json" },
     });
 
@@ -143,14 +160,7 @@ async function pooled<T, R>(
 // ----------------------------------------------------------------
 // Main
 // ----------------------------------------------------------------
-async function main() {
-  const args = process.argv.slice(2);
-  const kommunenummer =
-    args.find((a) => a.startsWith("--kommune="))?.split("=")[1] ?? "1865";
-  const year = parseInt(
-    args.find((a) => a.startsWith("--year="))?.split("=")[1] ?? "2024"
-  );
-
+async function fetchKommune(kommunenummer: string, year: number) {
   console.log(
     `🏢 Brreg fetcher — kommune ${kommunenummer}, year ${year}`
   );
@@ -236,7 +246,25 @@ async function main() {
   }
 
   console.log(
-    `\n✅ Brreg fetch complete — ${upserted} companies, ${withAccounts} with accounts.`
+    `\n✅ Kommune ${kommunenummer} complete — ${upserted} companies, ${withAccounts} with accounts.`
+  );
+}
+
+async function main() {
+  const args = process.argv.slice(2);
+  const kommuneArg = args.find((a) => a.startsWith("--kommune="))?.split("=")[1];
+  const year = parseInt(
+    args.find((a) => a.startsWith("--year="))?.split("=")[1] ?? "2024"
+  );
+
+  const kommuner = kommuneArg ? [kommuneArg] : LOFOTEN_KOMMUNER;
+
+  for (const kommunenummer of kommuner) {
+    await fetchKommune(kommunenummer, year);
+  }
+
+  console.log(
+    `\n✅ Brreg fetch complete — ${kommuner.length} municipality(ies), year ${year}.`
   );
 }
 
