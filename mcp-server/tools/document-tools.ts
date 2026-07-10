@@ -18,6 +18,7 @@ const EMBED_MODEL = "text-embedding-3-small";
 export const documentTools: Tool[] = [
   {
     name: "doc_search",
+    annotations: { readOnlyHint: true, openWorldHint: true },
     description:
       "Søk i biblioteket av offentlige dokumenter: reiselivsstrategier, kommuneplaner, NHO-rapporter, Menon-analyser og andre utredninger. Bruk dette verktøyet — ikke web_search — for dokumenter som er lastet inn i systemet. Returner alltid kildetittel og sidetall i svaret. Bruk gjerne flere søk med ulike formuleringer for å dekke samme tema.",
     inputSchema: {
@@ -54,6 +55,7 @@ export const documentTools: Tool[] = [
   },
   {
     name: "doc_list",
+    annotations: { readOnlyHint: true, openWorldHint: false },
     description:
       "List alle dokumenter som er indeksert i RAG-systemet. Bruk dette for å se hva som finnes før du søker, eller når du er usikker på om et dokument er lastet inn.",
     inputSchema: {
@@ -81,6 +83,7 @@ export const documentTools: Tool[] = [
   },
   {
     name: "doc_ingest",
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
     description:
       "Ingest et dokument inn i RAG-systemet fra en lokal filsti. Etter ingest er dokumentet søkbart via doc_search. Bruk force_reingest hvis dokumentet er oppdatert og må re-prosesseres.",
     inputSchema: {

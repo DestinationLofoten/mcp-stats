@@ -87,6 +87,25 @@ export const sentimentTools: Tool[] = [
     },
   },
   {
+    name: "sentiment_ratings",
+    annotations: { readOnlyHint: true, openWorldHint: false },
+    description:
+      "Aggregate Google review ratings per company — returns total reviews, star rating distribution (1–5), average sentiment score, and overall average stars extracted from review titles. No cap, covers all analyzed reviews. Use this for 'what is the average rating for each company' questions instead of sentiment_recent.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        author: {
+          type: "string",
+          description: "Filter to a single company (partial match, e.g. 'Go2Lofoten'). Omit to get all companies.",
+        },
+        min_reviews: {
+          type: "number",
+          description: "Only include companies with at least this many reviews (default: 1)",
+        },
+      },
+    },
+  },
+  {
     name: "sentiment_search",
     annotations: { readOnlyHint: true, openWorldHint: true },
     description:
@@ -134,6 +153,7 @@ export async function handleSentimentTool(
     case "sentiment_summary": return sentimentSummary(args);
     case "sentiment_topics":  return sentimentTopics(args);
     case "sentiment_search":  return sentimentSearch(args);
+    case "sentiment_ratings": return sentimentRatings(args);
     default:
       throw new Error(`Unknown sentiment tool: ${name}`);
   }
@@ -229,6 +249,31 @@ async function sentimentTopics(args: Record<string, unknown>) {
           null,
           2
         ),
+      },
+    ],
+  };
+}
+
+// ----------------------------------------------------------------
+// sentiment_ratings
+// ----------------------------------------------------------------
+async function sentimentRatings(args: Record<string, unknown>) {
+  const minReviews = Number(args.min_reviews ?? 1);
+
+  // Extract star count from titles like "Company — ★★★★☆" or "Company — ★★★★★"
+  // Stars are stored as unicode ★ (filled) and ☆ (empty) in the title field
+  const { data, error } = await supabase.rpc("aggregate_google_ratings", {
+    filter_author: (args.author as string) ?? null,
+    min_review_count: minReviews,
+  });
+
+  if (error) throw new Error(`sentiment_ratings failed: ${error.message}`);
+
+  return {
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify({ companies: data }, null, 2),
       },
     ],
   };

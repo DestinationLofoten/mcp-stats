@@ -15,6 +15,7 @@ export const ssbTools: Tool[] = [
     name: "ssb_list_datasets",
     description:
       "List all SSB statistical datasets available in the database, with their table IDs and descriptions.",
+    annotations: { readOnlyHint: true, openWorldHint: false },
     inputSchema: {
       type: "object",
       properties: {},
@@ -24,6 +25,7 @@ export const ssbTools: Tool[] = [
     name: "ssb_get_observations",
     description:
       "Get statistical observations from a specific SSB dataset. Filter by region, time period, or category. Use ssb_list_datasets first to find available table IDs.",
+    annotations: { readOnlyHint: true, openWorldHint: false },
     inputSchema: {
       type: "object",
       properties: {
@@ -78,6 +80,7 @@ export const ssbTools: Tool[] = [
     name: "ssb_compare_regions",
     description:
       "Compare a statistical measure across multiple regions for the most recent available time period. Great for generating regional comparison reports.",
+    annotations: { readOnlyHint: true, openWorldHint: false },
     inputSchema: {
       type: "object",
       properties: {
@@ -103,6 +106,7 @@ export const ssbTools: Tool[] = [
     name: "ssb_time_series",
     description:
       "Get a time series of observations for one or more regions, useful for trend analysis and reports showing change over time.",
+    annotations: { readOnlyHint: true, openWorldHint: false },
     inputSchema: {
       type: "object",
       properties: {
@@ -124,6 +128,7 @@ export const ssbTools: Tool[] = [
   },
   {
     name: "ssb_employment_by_industry",
+    annotations: { readOnlyHint: true, openWorldHint: false },
     description:
       "Get employment figures (sysselsatte) per 4th quarter by industry (næring/NACE2007) for Lofoten municipalities, from SSB table 13470. Covers Vågan (1865), Vestvågøy (1860), Flakstad (1859), Moskenes (1874), Røst (1856) and Værøy (1857). Data covers 2008–present. Use this to analyse which industries employ people in Lofoten, compare municipalities, and see how the tourism sector relates to others. The 'contents_type' parameter switches between people counted by residence (bosted) or by workplace (arbeidssted) — prefer arbeidssted for understanding actual local employment footprint.",
     inputSchema: {
@@ -168,6 +173,7 @@ export const ssbTools: Tool[] = [
   },
   {
     name: "ssb_wage_earners_by_industry",
+    annotations: { readOnlyHint: true, openWorldHint: false },
     description:
       "Get quarterly wage earners (lønnstakere) and jobs (jobber) by tourism industry for Lofoten municipalities, from SSB table 13926. Covers Vågan (1865), Vestvågøy (1860), Flakstad (1859), Moskenes (1874), Røst (1856) and Værøy (1857). Industries follow the NHO tourism model: 'transport', 'overnatting', 'servering', 'formidling', 'opplevingar'. Use this to analyse seasonal variation (quarterly), compare municipalities, and track employment trends in the tourism sector. Note: lønnstakere = wage earners (individuals), jobber = jobs (including multiple jobs per person).",
     inputSchema: {
@@ -217,8 +223,9 @@ export const ssbTools: Tool[] = [
   },
   {
     name: "ssb_overnights_by_market",
+    annotations: { readOnlyHint: true, openWorldHint: false },
     description:
-      "Get overnight stay totals by visitor market (country of origin) for any Norwegian tourism region and time period. Data is pre-aggregated across all accommodation types (hotels + camping/cabins/hostels combined). Use this for all market ranking, share analysis, and country-level comparisons — it is more reliable than ssb_get_observations for this purpose. Country codes: '000'=Norway, '00000'=all countries total, 'ccc'=all foreign total. Rows with null values (SSB-suppressed data below reporting threshold) are excluded by default. IMPORTANT: When asking about a specific country (e.g. 'Kina', 'USA'), always pass the `country` parameter — without it, the default limit sorted by total_overnights will cut off small markets and you may incorrectly conclude data is missing. If the response includes truncated: true, refine your query or increase the limit.",
+      "Get overnight stay totals by visitor market (country of origin) for any Norwegian tourism region and time period. Data is pre-aggregated across all accommodation types (hotels + camping/cabins/hostels combined). Use this for all market ranking, share analysis, and country-level comparisons — it is more reliable than ssb_get_observations for this purpose. Country codes: '000'=Norway, '00000'=all countries total, 'ccc'=all foreign total. Rows with null values (SSB-suppressed data below reporting threshold) are excluded by default. IMPORTANT: When asking about a specific country (e.g. 'Kina', 'USA'), always pass the `country` parameter — without it, the default limit sorted by total_overnights will cut off small markets and you may incorrectly conclude data is missing. If the response includes truncated: true, refine your query or increase the limit. Use the `year` parameter to get annual totals — it sums all months server-side and returns one row per country, which is more reliable than manually adding monthly rows.",
     inputSchema: {
       type: "object",
       properties: {
@@ -226,13 +233,17 @@ export const ssbTools: Tool[] = [
           type: "string",
           description: "Filter by region name or code (e.g. 'Lofoten', 'Nordland', '18105')",
         },
+        year: {
+          type: "string",
+          description: "Aggregate all months for this year and return annual totals per country (e.g. '2025'). When provided, time_period and time_from are ignored. Prefer this over manually summing monthly rows.",
+        },
         time_period: {
           type: "string",
-          description: "Filter by specific month (e.g. '2025M12')",
+          description: "Filter by specific month (e.g. '2025M12'). Ignored when `year` is set.",
         },
         time_from: {
           type: "string",
-          description: "Filter from this month onwards (e.g. '2024M01')",
+          description: "Filter from this month onwards (e.g. '2024M01'). Ignored when `year` is set.",
         },
         country: {
           type: "string",
@@ -244,7 +255,7 @@ export const ssbTools: Tool[] = [
         },
         limit: {
           type: "number",
-          description: "Max rows to return (default: 100)",
+          description: "Max rows to return (default: 100). Not applied when `year` is set (all matching countries are returned).",
         },
         order_by: {
           type: "string",
@@ -594,10 +605,78 @@ async function wageEarnersByIndustry(args: Record<string, unknown>) {
 }
 
 async function overnightsByMarket(args: Record<string, unknown>) {
-  const limit = Math.min(Number(args.limit ?? 100), 500);
-  const orderBy = (args.order_by as string) ?? "total_overnights";
   const orderDesc = args.order_desc !== false;
   const excludeAggregates = args.exclude_aggregates !== false;
+
+  // Annual aggregation mode: fetch all months for the year and sum server-side
+  if (args.year) {
+    const year = args.year as string;
+    const timeFrom = `${year}M01`;
+    const timeTo = `${year}M12`;
+
+    let query = supabase
+      .from("ssb_overnights_by_market")
+      .select("region, region_name, country_code, country_label, total_overnights, unit")
+      .gte("time_period", timeFrom)
+      .lte("time_period", timeTo)
+      .not("total_overnights", "is", null);
+
+    if (args.region)
+      query = query.or(`region.ilike.%${args.region}%,region_name.ilike.%${args.region}%`);
+    if (args.country)
+      query = query.ilike("country_label", `%${args.country}%`);
+    if (excludeAggregates)
+      query = query.neq("country_code", "00000").neq("country_code", "ccc");
+
+    const { data, error } = await query;
+    if (error) throw new Error(`ssb_overnights_by_market annual query failed: ${error.message ?? JSON.stringify(error)}`);
+
+    // Aggregate by country across all months
+    const byCountry = new Map<string, { region: string; region_name: string; country_code: string; country_label: string; total_overnights: number; unit: string }>();
+    for (const row of data ?? []) {
+      const key = `${row.region}__${row.country_code}`;
+      const existing = byCountry.get(key);
+      const val = Number(row.total_overnights);
+      if (existing) {
+        existing.total_overnights += val;
+      } else {
+        byCountry.set(key, {
+          region: row.region,
+          region_name: row.region_name,
+          country_code: row.country_code,
+          country_label: row.country_label,
+          total_overnights: val,
+          unit: row.unit,
+        });
+      }
+    }
+
+    const markets = Array.from(byCountry.values()).sort((a, b) =>
+      orderDesc ? b.total_overnights - a.total_overnights : a.total_overnights - b.total_overnights
+    );
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify(
+            {
+              note: `Annual totals for ${year}. Summed across all available months and all accommodation types.`,
+              year,
+              count: markets.length,
+              markets,
+            },
+            null,
+            2
+          ),
+        },
+      ],
+    };
+  }
+
+  // Default monthly mode
+  const limit = Math.min(Number(args.limit ?? 100), 500);
+  const orderBy = (args.order_by as string) ?? "total_overnights";
 
   let query = supabase
     .from("ssb_overnights_by_market")
@@ -616,13 +695,11 @@ async function overnightsByMarket(args: Record<string, unknown>) {
   if (excludeAggregates)
     query = query.neq("country_code", "00000").neq("country_code", "ccc");
 
-  // Exclude rows where SSB suppressed the value (null = confidential / below threshold)
   query = query.not("total_overnights", "is", null);
 
   const { data, error } = await query;
   if (error) throw new Error(`ssb_overnights_by_market query failed: ${error.message ?? JSON.stringify(error)}`);
 
-  // Coerce total_overnights to number (view may return it as string from numeric SUM)
   const markets = (data ?? []).map((row) => ({
     ...row,
     total_overnights: row.total_overnights == null ? null : Number(row.total_overnights),

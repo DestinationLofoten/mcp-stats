@@ -96,6 +96,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 // Start server
 // ----------------------------------------------------------------
 async function main() {
+  const missing = ["SUPABASE_URL", "SUPABASE_ANON_KEY", "OPENAI_API_KEY"].filter(
+    (k) => !process.env[k]
+  );
+  if (missing.length) {
+    console.error(`[NorData] Missing required env vars: ${missing.join(", ")}`);
+    process.exit(1);
+  }
+
   const transport = new StdioServerTransport();
   await server.connect(transport);
   console.error("NorData MCP server running on stdio");

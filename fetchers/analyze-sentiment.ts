@@ -21,12 +21,15 @@ import { getSupabaseAdmin } from "../lib/supabase";
 dotenv.config({ path: path.resolve(__dirname, "../.env"), override: true });
 
 const supabase = getSupabaseAdmin();
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+const anthropic = new Anthropic({
+  apiKey: process.env.ANTHROPIC_API_KEY,
+  defaultHeaders: { "anthropic-beta": "prompt-caching-2024-07-31" },
+});
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 const EMBED_MODEL = "text-embedding-3-small";
 const ANALYSIS_MODEL = "claude-haiku-4-5-20251001";
-const BATCH_SIZE = 5; // parallel calls per round — stays under 50 req/min rate limit
+const BATCH_SIZE = 5; // parallel calls per round
 const MAX_TEXT_CHARS = 2000; // truncate long posts before sending to Claude
 
 interface RawMention {
@@ -65,7 +68,7 @@ async function analyzeMention(mention: RawMention): Promise<SentimentResult> {
   const response = await anthropic.messages.create({
     model: ANALYSIS_MODEL,
     max_tokens: 256,
-    system: SYSTEM_PROMPT,
+    system: [{ type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } }],
     messages: [{ role: "user", content: text }],
   });
 
@@ -150,9 +153,9 @@ async function main() {
     const done = Math.min(i + BATCH_SIZE, mentions.length);
     console.log(`  ${done}/${mentions.length} — ${processed} ok, ${failed} failed`);
 
-    // Pause between batches to respect 50 req/min rate limit
+    // 7s between batches of 5 = ~43 req/min, safely under Tier 1 Haiku limit of 50
     if (done < mentions.length) {
-      await new Promise((r) => setTimeout(r, 1500));
+      await new Promise((r) => setTimeout(r, 7000));
     }
   }
 

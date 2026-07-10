@@ -35,7 +35,9 @@ interface SSBTableConfig {
   description: string;
   unit: string;
   query: object;
+  buildQuery?: (fromPeriod: string) => object; // dynamic query builder for incremental fetches
   skipNulls?: boolean;
+  upsertOnly?: boolean; // skip clear+insert, use upsert instead (for large tables)
   mapRow: (
     variables: Record<string, string>,
     labels: Record<string, string>,
@@ -53,16 +55,35 @@ interface SSBTableConfig {
 }
 
 // ----------------------------------------------------------------
+// Helpers
+// ----------------------------------------------------------------
+
+/** Subtract `n` months from an SSB period string like "2026M04" → "2026M02" */
+function subtractMonths(period: string, n: number): string {
+  const match = period.match(/^(\d{4})M(\d{2})$/);
+  if (!match) throw new Error(`Unexpected period format: ${period}`);
+  let year = parseInt(match[1]);
+  let month = parseInt(match[2]) - n;
+  while (month <= 0) {
+    month += 12;
+    year -= 1;
+  }
+  return `${year}M${String(month).padStart(2, "0")}`;
+}
+
+// ----------------------------------------------------------------
 // Table configs
 // ----------------------------------------------------------------
 const TABLES: SSBTableConfig[] = [
   {
     tableId: "14172",
+    upsertOnly: true, // table too large to clear; upsert keeps existing history intact
     title: "Overnattingar etter region, måned og innkvarteringstype",
     description:
       "Tal på overnattingar etter region, innkvarteringstype og gjestane sitt heimland",
     unit: "overnattingar",
-    query: {
+    query: {}, // unused — overridden by buildQuery below
+    buildQuery: (fromPeriod: string) => ({
       query: [
         {
           code: "Region",
@@ -85,11 +106,11 @@ const TABLES: SSBTableConfig[] = [
         },
         {
           code: "Tid",
-          selection: { filter: "top", values: ["120"] }, // last 120 months (~10 years)
+          selection: { filter: "from", values: [fromPeriod] }, // only months from this period onwards
         },
       ],
       response: { format: "json-stat2" },
-    },
+    }),
     mapRow: (vars, labels, value) => ({
       region: vars["Region"],
       region_name: labels["Region"] ?? vars["Region"],
@@ -403,8 +424,27 @@ async function fetchSSBTable(config: SSBTableConfig) {
     throw new Error(`Failed to upsert dataset: ${dsErr?.message}`);
   }
 
+  // For incremental tables, build a dynamic query starting from 2 months before
+  // the latest period already in Supabase (2-month buffer catches SSB revisions).
+  let query = config.query;
+  if (config.buildQuery) {
+    const { data: latest } = await supabase
+      .from("ssb_observations")
+      .select("time_period")
+      .eq("dataset_id", dataset.id)
+      .order("time_period", { ascending: false })
+      .limit(1)
+      .single();
+
+    const fromPeriod = latest?.time_period
+      ? subtractMonths(latest.time_period, 2)
+      : "2023M01"; // fallback: fetch last ~3 years if table is empty
+    console.log(`   📅 Incremental fetch from ${fromPeriod} (latest in DB: ${latest?.time_period ?? "none"})`);
+    query = config.buildQuery(fromPeriod);
+  }
+
   const url = `${BASE_URL}/no/table/${config.tableId}`;
-  const response = await axios.post<JSONStat2>(url, config.query, {
+  const response = await axios.post<JSONStat2>(url, query, {
     headers: { "Content-Type": "application/json" },
   });
 
@@ -421,28 +461,47 @@ async function fetchSSBTable(config: SSBTableConfig) {
     });
   }
 
-  // Delete all existing observations for this dataset before reinserting.
-  // Uses a SECURITY DEFINER RPC so the delete runs server-side without client statement timeout.
-  console.log(`   🗑️  Clearing old observations...`);
-  const { error: delErr } = await supabase.rpc("clear_ssb_dataset", {
-    p_dataset_id: dataset.id,
-  });
-  if (delErr) throw new Error(`Failed to clear dataset: ${delErr.message}`);
-
   const batchSize = 1000;
   let inserted = 0;
 
-  for (let i = 0; i < rows.length; i += batchSize) {
-    const batch = rows.slice(i, i + batchSize);
-    const { error } = await supabase.from("ssb_observations").insert(batch);
+  if (config.upsertOnly) {
+    // Large tables: skip clear, upsert by unique key to add new rows without disturbing history
+    console.log(`   🔄 Upserting observations (skipping clear)...`);
+    for (let i = 0; i < rows.length; i += batchSize) {
+      const batch = rows.slice(i, i + batchSize);
+      const { error } = await supabase
+        .from("ssb_observations")
+        .upsert(batch, { onConflict: "dataset_id,region,time_period,category" });
 
-    if (error) {
-      console.error(`   ❌ Insert error at batch ${i}: ${error.message}`);
-      throw error;
+      if (error) {
+        console.error(`   ❌ Upsert error at batch ${i}: ${error.message}`);
+        throw error;
+      }
+
+      inserted += batch.length;
+      console.log(`   ✅ Upserted ${inserted}/${rows.length} observations`);
     }
+  } else {
+    // Delete all existing observations for this dataset before reinserting.
+    // Uses a SECURITY DEFINER RPC so the delete runs server-side without client statement timeout.
+    console.log(`   🗑️  Clearing old observations...`);
+    const { error: delErr } = await supabase.rpc("clear_ssb_dataset", {
+      p_dataset_id: dataset.id,
+    });
+    if (delErr) throw new Error(`Failed to clear dataset: ${delErr.message}`);
 
-    inserted += batch.length;
-    console.log(`   ✅ Inserted ${inserted}/${rows.length} observations`);
+    for (let i = 0; i < rows.length; i += batchSize) {
+      const batch = rows.slice(i, i + batchSize);
+      const { error } = await supabase.from("ssb_observations").insert(batch);
+
+      if (error) {
+        console.error(`   ❌ Insert error at batch ${i}: ${error.message}`);
+        throw error;
+      }
+
+      inserted += batch.length;
+      console.log(`   ✅ Inserted ${inserted}/${rows.length} observations`);
+    }
   }
 
   console.log(`   ✅ Table ${config.tableId} complete — ${rows.length} rows`);
@@ -466,7 +525,14 @@ async function refreshMaterializedViews() {
 async function main() {
   console.log("📈 SSB fetcher starting...");
 
-  for (const table of TABLES) {
+  const onlyTable = process.argv.find((a) => a.startsWith("--table="))?.split("=")[1];
+  const tables = onlyTable ? TABLES.filter((t) => t.tableId === onlyTable) : TABLES;
+  if (onlyTable && tables.length === 0) {
+    console.error(`No table config found for tableId "${onlyTable}"`);
+    process.exit(1);
+  }
+
+  for (const table of tables) {
     await fetchSSBTable(table);
     await new Promise((r) => setTimeout(r, 500));
   }
