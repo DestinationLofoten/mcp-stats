@@ -13,6 +13,7 @@ import { supabase } from "../../lib/supabase";
 export const brregTools: Tool[] = [
   {
     name: "brreg_search_companies",
+    annotations: { readOnlyHint: true, openWorldHint: false },
     description:
       "Search companies in Lofoten (Vågan, Vestvågøy, Flakstad, Moskenes, Røst, Værøy) from Brønnøysundregistrene. Filter by name, NACE industry code, or company type. Returns company details including financial data (revenue, costs, profit, assets, equity) for a given accounting year.",
     inputSchema: {
@@ -56,6 +57,7 @@ export const brregTools: Tool[] = [
   },
   {
     name: "brreg_company_stats",
+    annotations: { readOnlyHint: true, openWorldHint: false },
     description:
       "Get aggregate statistics about companies in Lofoten (Vågan, Vestvågøy, Flakstad, Moskenes, Røst, Værøy): counts and financial totals grouped by municipality, industry (NACE), or company type. Useful for overview reports and comparisons.",
     inputSchema: {
@@ -80,6 +82,7 @@ export const brregTools: Tool[] = [
   },
   {
     name: "brreg_get_company",
+    annotations: { readOnlyHint: true, openWorldHint: false },
     description:
       "Get full details for a specific company by organisation number, including all financial data.",
     inputSchema: {
@@ -193,51 +196,24 @@ async function companyStats(args: Record<string, unknown>) {
     throw new Error(`Invalid group_by: ${groupBy}. Must be one of: ${validColumns.join(", ")}`);
   }
 
-  // Fetch all rows for the year (Vågan has ~1400 companies, manageable in memory)
-  const selectCols = `${groupBy}, employees, revenue, operating_costs, annual_result, total_assets, equity, has_accounts`;
-  const { data, error } = await (supabase
-    .from("brreg_companies") as any)
-    .select(selectCols)
-    .eq("accounting_year", year)
-    .not(groupBy, "is", null);
+  // Aggregate in Postgres: the Data API caps a single select at 1,000 rows,
+  // and the table holds several thousand companies per year.
+  const { data, error } = await supabase.rpc("brreg_company_stats", {
+    p_group_by: groupBy,
+    p_year: year,
+    p_limit: limit,
+  });
 
   if (error) throw new Error(`brreg_company_stats failed: ${error.message}`);
 
-  // Aggregate in memory
-  const groups: Record<string, {
-    count: number;
-    with_accounts: number;
-    total_employees: number;
-    total_revenue: number;
-    total_annual_result: number;
-    total_assets: number;
-  }> = {};
-
-  for (const row of data ?? []) {
-    const key = (row as Record<string, unknown>)[groupBy] as string ?? "Unknown";
-    if (!groups[key]) {
-      groups[key] = { count: 0, with_accounts: 0, total_employees: 0, total_revenue: 0, total_annual_result: 0, total_assets: 0 };
-    }
-    const g = groups[key];
-    g.count++;
-    if ((row as Record<string, unknown>).has_accounts) g.with_accounts++;
-    g.total_employees += Number((row as Record<string, unknown>).employees ?? 0);
-    g.total_revenue += Number((row as Record<string, unknown>).revenue ?? 0);
-    g.total_annual_result += Number((row as Record<string, unknown>).annual_result ?? 0);
-    g.total_assets += Number((row as Record<string, unknown>).total_assets ?? 0);
-  }
-
-  const sorted = Object.entries(groups)
-    .map(([name, stats]) => ({ name, ...stats }))
-    .sort((a, b) => b.count - a.count)
-    .slice(0, limit);
+  const result = data as { total_groups: number; data: unknown[] };
 
   return {
     content: [
       {
         type: "text",
         text: JSON.stringify(
-          { accounting_year: year, group_by: groupBy, total_groups: sorted.length, data: sorted },
+          { accounting_year: year, group_by: groupBy, total_groups: result.total_groups, data: result.data },
           null,
           2
         ),
