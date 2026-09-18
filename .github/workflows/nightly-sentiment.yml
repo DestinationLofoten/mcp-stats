@@ -39,10 +39,13 @@ jobs:
       - name: Fetch RSS feeds
         run: npm run fetch:rss -- --days 7
 
-      - name: Fetch Google Reviews
-        env:
-          APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
-        run: npm run fetch:reviews
+      # Google Reviews ingestion disabled 2026-09-18 to keep the Supabase DB
+      # under the 500 MB limit. The Apify schedule is also stopped. To re-enable,
+      # restore this step (and the Apify schedule) — see fetchers/apify.ts.
+      # - name: Fetch Google Reviews
+      #   env:
+      #     APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
+      #   run: npm run fetch:reviews
 
       - name: Analyze sentiment
         run: npm run analyze:sentiment -- --limit 200
