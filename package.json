@@ -33,7 +33,7 @@
     "pdf-parse": "^1.1.1",
     "rss-parser": "^3.13.0",
     "tiktoken": "^1.0.22",
-    "zod": "^3.23.0"
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
