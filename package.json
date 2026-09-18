@@ -29,7 +29,7 @@
     "dotenv": "^16.4.0",
     "googleapis": "^171.4.0",
     "mammoth": "^1.12.3",
-    "openai": "^6.38.0",
+    "openai": "^7.15.0",
     "pdf-parse": "^1.1.1",
     "rss-parser": "^3.13.0",
     "tiktoken": "^1.0.22",
