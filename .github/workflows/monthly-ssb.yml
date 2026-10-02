@@ -1,0 +1,36 @@
+name: Monthly SSB fetch
+
+on:
+  schedule:
+    # 04:00 UTC on the 10th of each month. SSB publishes the previous month's
+    # overnight/hotel statistics in the first days of the month.
+    - cron: "0 4 10 * *"
+  workflow_dispatch:
+    # Also allows manual trigger from the GitHub Actions tab
+
+jobs:
+  fetch-ssb:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Fetch SSB tables
+        run: npm run fetch:ssb

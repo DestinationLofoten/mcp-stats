@@ -38,6 +38,7 @@ interface SSBTableConfig {
   buildQuery?: (fromPeriod: string) => object; // dynamic query builder for incremental fetches
   skipNulls?: boolean;
   upsertOnly?: boolean; // skip clear+insert, use upsert instead (for large tables)
+  skipIfCurrent?: boolean; // skip the refetch when the DB already has SSB's latest period (large, rarely updated tables)
   mapRow: (
     variables: Record<string, string>,
     labels: Record<string, string>,
@@ -69,6 +70,15 @@ function subtractMonths(period: string, n: number): string {
     year -= 1;
   }
   return `${year}M${String(month).padStart(2, "0")}`;
+}
+
+// Number of months from `period` up to and including the current month.
+// SSB's v0 API has no "from" filter, so incremental fetches use "top" with this count.
+function monthsSince(period: string): number {
+  const match = period.match(/^(\d{4})M(\d{2})$/);
+  if (!match) throw new Error(`Unexpected period format: ${period}`);
+  const now = new Date();
+  return (now.getFullYear() - parseInt(match[1])) * 12 + (now.getMonth() + 1 - parseInt(match[2])) + 1;
 }
 
 // ----------------------------------------------------------------
@@ -106,7 +116,8 @@ const TABLES: SSBTableConfig[] = [
         },
         {
           code: "Tid",
-          selection: { filter: "from", values: [fromPeriod] }, // only months from this period onwards
+          // latest N months, covering fromPeriod onwards (v0 API has no "from" filter)
+          selection: { filter: "top", values: [String(monthsSince(fromPeriod))] },
         },
       ],
       response: { format: "json-stat2" },
@@ -233,6 +244,7 @@ const TABLES: SSBTableConfig[] = [
       "Sysselsatte personar per 4. kvartal etter næring (SN2007) og år for Lofoten-kommunane: Vågan (1865), Vestvågøy (1860), Flakstad (1859), Moskenes (1874), Røst (1856) og Værøy (1857)",
     unit: "personar",
     skipNulls: true,
+    skipIfCurrent: true, // annual, ~394k rows — only reload when SSB publishes a new year
     query: {
       query: [
         {
@@ -424,6 +436,24 @@ async function fetchSSBTable(config: SSBTableConfig) {
     throw new Error(`Failed to upsert dataset: ${dsErr?.message}`);
   }
 
+  if (config.skipIfCurrent && !process.argv.includes("--force")) {
+    const { data: meta } = await axios.get<{ variables: { code: string; values: string[] }[] }>(
+      `${BASE_URL}/no/table/${config.tableId}`
+    );
+    const ssbLatest = meta.variables.find((v) => v.code === "Tid")?.values.at(-1);
+    const { data: latest } = await supabase
+      .from("ssb_observations")
+      .select("time_period")
+      .eq("dataset_id", dataset.id)
+      .order("time_period", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (ssbLatest && latest?.time_period === ssbLatest) {
+      console.log(`   ⏭️  Already current (${ssbLatest}) — skipping. Use --force to reload.`);
+      return;
+    }
+  }
+
   // For incremental tables, build a dynamic query starting from 2 months before
   // the latest period already in Supabase (2-month buffer catches SSB revisions).
   let query = config.query;
@@ -514,12 +544,10 @@ async function refreshMaterializedViews() {
   console.log("\n🔄 Refreshing materialized views...");
   const { error } = await supabase.rpc("refresh_ssb_overnights_view" as never);
   if (error) {
-    // Fallback: log the error but don't crash — the view will be stale until next run
-    console.warn(`   ⚠️  Could not refresh view via RPC: ${error.message}`);
-    console.warn("   Run manually: REFRESH MATERIALIZED VIEW ssb_overnights_by_market;");
-  } else {
-    console.log("   ✅ ssb_overnights_by_market refreshed");
+    // Fail loudly so a scheduled run doesn't leave the view silently stale
+    throw new Error(`Could not refresh ssb_overnights_by_market: ${error.message}`);
   }
+  console.log("   ✅ ssb_overnights_by_market refreshed");
 }
 
 async function main() {
