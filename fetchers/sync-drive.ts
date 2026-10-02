@@ -12,7 +12,9 @@
  *   3. Run: npm run sync:drive        (download + ingest all new files)
  *
  * SUBSEQUENT RUNS:
- *   npm run sync:drive                (skips already-ingested files automatically)
+ *   npm run sync:drive                (ingests every new file in the nordata-dokumenter
+ *                                      folder tree; already-ingested files are skipped)
+ *   npm run sync:drive -- --dry-run   (list what would be ingested, change nothing)
  *   npm run sync:drive -- --force     (re-ingest all files)
  *
  * See README for how to create Google Cloud OAuth2 Desktop credentials.
@@ -25,6 +27,7 @@ import * as dotenv from "dotenv";
 import { google, drive_v3 } from "googleapis";
 import { OAuth2Client } from "google-auth-library";
 import { ingestDocument } from "./documents";
+import { getSupabaseAdmin } from "../lib/supabase";
 
 dotenv.config({ path: path.resolve(__dirname, "../.env") });
 
@@ -32,18 +35,39 @@ const CREDENTIALS_PATH = path.resolve(__dirname, "../.credentials/google.json");
 const SCOPES = ["https://www.googleapis.com/auth/drive.readonly"];
 
 // ----------------------------------------------------------------
-// File manifest — all Drive files to sync into RAG
+// Drive layout — everything under ROOT_FOLDER_ID is synced:
+//   nordata-dokumenter/<category>/<municipality or publisher>/…/file.pdf
+// The first folder level gives the category, the second the municipality.
+// Supported files: PDF, Word (.docx) and Google Docs (exported as .docx).
+// ----------------------------------------------------------------
+const ROOT_FOLDER_ID = process.env.NORDATA_DRIVE_FOLDER_ID || "1u6BiOfkPXjMuCF2iJvBfaxupRcAWiZrg";
+
+type Category = "strategi" | "rapport" | "plan" | "utredning" | "statistikk" | "annet";
+const CATEGORIES: Category[] = ["strategi", "rapport", "plan", "utredning", "statistikk"];
+
+// Second-level folder name (lowercased) → municipality/publisher.
+// Unknown folders fall back to the folder name with "-kommune" stripped.
+const FOLDER_META: Record<string, { municipality: string; publisher?: string }> = {
+  "lofotrådet": { municipality: "Lofoten", publisher: "Lofotrådet" },
+  "lofoten-de-grønne-øyene": { municipality: "Lofoten", publisher: "Lofoten – De Grønne Øyene" },
+  "nordland fylke": { municipality: "Nordland", publisher: "Nordland fylkeskommune" },
+};
+
+// ----------------------------------------------------------------
+// Per-file overrides — optional nicer titles/years/metadata, keyed by
+// Drive ID. Files listed here are also synced even if they live outside
+// ROOT_FOLDER_ID. Files without an entry get their title from the filename.
 // ----------------------------------------------------------------
 interface FileManifest {
   driveId: string;
   title: string;
-  category: "strategi" | "rapport" | "plan" | "utredning" | "statistikk";
+  category?: Category;
   municipality?: string;
   publisher?: string;
   year?: number;
 }
 
-const FILES: FileManifest[] = [
+const OVERRIDES: FileManifest[] = [
   // ── strategi / Lofotrådet ────────────────────────────────────────
   {
     driveId: "1An5vhzJoQhV5hZ0eOPlHpIlKZ3Or0RvA",
@@ -481,6 +505,77 @@ const FILES: FileManifest[] = [
     publisher: "Lofoten – De Grønne Øyene",
     year: 2022,
   },
+  // ── plan / nordland-fylkeskommune — regional plan for livskraftige lokalsamfunn (høring) ──
+  {
+    driveId: "1y3I7sZVfTGggUltc62YqdgvQiaV2Xz1_",
+    title: "Høring og offentlig ettersyn – Regional plan for livskraftige lokalsamfunn – Nordland",
+    category: "plan",
+    municipality: "Nordland",
+    publisher: "Nordland fylkeskommune",
+  },
+  {
+    driveId: "1B_khT0aAI2Vnaqhza3PVz2ftP8uK5xIO",
+    title: "Høringsbrev – Regional plan for livskraftige lokalsamfunn – Nordland",
+    category: "plan",
+    municipality: "Nordland",
+    publisher: "Nordland fylkeskommune",
+  },
+  {
+    driveId: "1QudHaephthrElMHHl2nz-usVIdnkZ3c8",
+    title: "Høringsnotat – Planutkast regional plan for livskraftige lokalsamfunn – Nordland",
+    category: "plan",
+    municipality: "Nordland",
+    publisher: "Nordland fylkeskommune",
+  },
+  {
+    driveId: "17784HZO6m0Wg2FUpEonrt2TrOWAIZwg9",
+    title: "Vedlegg 1 – Lenker kunnskapsgrunnlag – Regional plan for livskraftige lokalsamfunn – Nordland",
+    category: "plan",
+    municipality: "Nordland",
+    publisher: "Nordland fylkeskommune",
+  },
+  {
+    driveId: "1Y_dZk3sFwAnj9rVi9a0m26nBNwDDHHpx",
+    title: "Vedlegg 2 – Kunnskapsgrunnlag befolkning, helse og levekår – Nordland",
+    category: "plan",
+    municipality: "Nordland",
+    publisher: "Nordland fylkeskommune",
+  },
+  {
+    driveId: "1zVGZXvvWBnYcAuopmQppxXR76AYqRNrH",
+    title: "Vedlegg 4 – Kunnskapsgrunnlag arealbruk og planlegging – Nordland",
+    category: "plan",
+    municipality: "Nordland",
+    publisher: "Nordland fylkeskommune",
+  },
+  {
+    driveId: "1-j7hf5qX2tY5GEW6V1O1BjasfIMHFgb8",
+    title: "Vedlegg 5 – Planbeskrivelse regional plan for livskraftige lokalsamfunn – Nordland",
+    category: "plan",
+    municipality: "Nordland",
+    publisher: "Nordland fylkeskommune",
+  },
+  {
+    driveId: "1g69kDzz_JBi1YKJpXm5cnsv_Yq5sccGj",
+    title: "Vedlegg 6 – Bærekraftvurdering av regionale planer for arealpolitikk og livskraftige lokalsamfunn – Nordland",
+    category: "plan",
+    municipality: "Nordland",
+    publisher: "Nordland fylkeskommune",
+  },
+  {
+    driveId: "1IADi4-HbuHtkeWAa2M0N6z7z3ErWXMgJ",
+    title: "Vedlegg 7 – Bærekraftvurdering: samlet fremstilling – Nordland",
+    category: "plan",
+    municipality: "Nordland",
+    publisher: "Nordland fylkeskommune",
+  },
+  {
+    driveId: "1jKU81wlqua4asPeuSsbSN1R4bZGrAzAH",
+    title: "Vedlegg 8 – Bærekraftvurdering: forslag til endring av delmål, strategier og tiltak – Nordland",
+    category: "plan",
+    municipality: "Nordland",
+    publisher: "Nordland fylkeskommune",
+  },
 ];
 
 // ----------------------------------------------------------------
@@ -556,14 +651,77 @@ export async function runAuthFlow(): Promise<void> {
 }
 
 // ----------------------------------------------------------------
-// Download a Drive file to a temp path
+// Walk the Drive folder tree
 // ----------------------------------------------------------------
-async function downloadFile(drive: drive_v3.Drive, fileId: string, destPath: string): Promise<void> {
+const FOLDER_MIME = "application/vnd.google-apps.folder";
+const GDOC_MIME = "application/vnd.google-apps.document";
+const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+
+interface DriveFile {
+  id: string;
+  name: string;
+  mimeType: string;
+  folders: string[]; // folder names below ROOT_FOLDER_ID, outermost first
+}
+
+async function listFolder(drive: drive_v3.Drive, folderId: string, folders: string[] = []): Promise<DriveFile[]> {
+  const out: DriveFile[] = [];
+  let pageToken: string | undefined;
+  do {
+    const res = await drive.files.list({
+      q: `'${folderId}' in parents and trashed = false`,
+      fields: "nextPageToken, files(id, name, mimeType)",
+      pageSize: 1000,
+      pageToken,
+      supportsAllDrives: true,
+      includeItemsFromAllDrives: true,
+    });
+    for (const f of res.data.files ?? []) {
+      if (f.mimeType === FOLDER_MIME) {
+        out.push(...(await listFolder(drive, f.id!, [...folders, f.name!])));
+      } else {
+        out.push({ id: f.id!, name: f.name!, mimeType: f.mimeType!, folders });
+      }
+    }
+    pageToken = res.data.nextPageToken ?? undefined;
+  } while (pageToken);
+  return out;
+}
+
+function fileTypeOf(f: DriveFile): "pdf" | "docx" | null {
+  if (f.mimeType === "application/pdf") return "pdf";
+  if (f.mimeType === DOCX_MIME || f.mimeType === GDOC_MIME) return "docx";
+  return null;
+}
+
+// "Vedlegg_4_kunnskapsgrunnlag_2022886_1_A_2727838.pdf" → "Vedlegg 4 kunnskapsgrunnlag"
+function titleFromFilename(name: string): string {
+  return name
+    .replace(/\.[a-z0-9]+$/i, "")
+    .replace(/(_\d{5,}_\d+_[A-Z]_\d{5,})$/, "") // archive reference suffix
+    .replace(/[_]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function metaFromFolders(folders: string[]): Pick<FileManifest, "category" | "municipality" | "publisher"> {
+  const [first, second] = folders.map((s) => s.trim());
+  const category = CATEGORIES.find((c) => c === first?.toLowerCase()) ?? "annet";
+  if (!second) return { category };
+  const known = FOLDER_META[second.toLowerCase()];
+  if (known) return { category, ...known };
+  const name = second.replace(/-kommune$/i, "").replace(/-/g, " ");
+  return { category, municipality: name.charAt(0).toUpperCase() + name.slice(1) };
+}
+
+// ----------------------------------------------------------------
+// Download a Drive file to a temp path (Google Docs are exported as .docx)
+// ----------------------------------------------------------------
+async function downloadFile(drive: drive_v3.Drive, file: DriveFile, destPath: string): Promise<void> {
   const dest = fs.createWriteStream(destPath);
-  const response = await drive.files.get(
-    { fileId, alt: "media" },
-    { responseType: "stream" }
-  );
+  const response = file.mimeType === GDOC_MIME
+    ? await drive.files.export({ fileId: file.id, mimeType: DOCX_MIME }, { responseType: "stream" })
+    : await drive.files.get({ fileId: file.id, alt: "media", supportsAllDrives: true }, { responseType: "stream" });
   await new Promise<void>((resolve, reject) => {
     (response.data as NodeJS.ReadableStream)
       .pipe(dest)
@@ -578,6 +736,7 @@ async function downloadFile(drive: drive_v3.Drive, fileId: string, destPath: str
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const force = args.includes("--force");
+  const dryRun = args.includes("--dry-run");
 
   // Auth mode
   if (args.includes("--auth")) {
@@ -590,31 +749,66 @@ async function main(): Promise<void> {
   google.options({ auth: oauth2 });
   const drive = google.drive({ version: "v3", auth: oauth2 });
 
+  // Collect files: everything in the folder tree + overrides living elsewhere
+  console.log(`\n📂  Listing Drive folder ${ROOT_FOLDER_ID} …`);
+  const files = await listFolder(drive, ROOT_FOLDER_ID);
+  const overrides = new Map(OVERRIDES.map((o) => [o.driveId, o]));
+  const inTree = new Set(files.map((f) => f.id));
+  for (const o of OVERRIDES) {
+    if (!inTree.has(o.driveId)) files.push({ id: o.driveId, name: o.title, mimeType: "application/pdf", folders: [] });
+  }
+
+  // Skip already-ingested files before downloading anything
+  const { data: existing, error } = await getSupabaseAdmin().from("documents").select("drive_id");
+  if (error) throw new Error(`Could not read documents: ${error.message}`);
+  const ingestedIds = new Set((existing ?? []).map((d: { drive_id: string }) => d.drive_id));
+
   const tmpDir = path.resolve(__dirname, "../.sync-tmp");
   if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
 
   let ingested = 0;
   let skipped = 0;
+  let unsupported = 0;
   let failed = 0;
 
-  console.log(`\n🔄  Syncing ${FILES.length} Drive files → Supabase RAG`);
-  console.log(`    force=${force}\n`);
+  console.log(`🔄  Syncing ${files.length} Drive files → Supabase RAG`);
+  console.log(`    force=${force} dryRun=${dryRun}\n`);
 
-  for (const file of FILES) {
-    const tmpPath = path.join(tmpDir, `${file.driveId}.pdf`);
+  for (const [i, file] of files.entries()) {
+    const fileType = fileTypeOf(file);
+    const label = `[${i + 1}/${files.length}] ${[...file.folders, file.name].join(" / ")}`;
+    if (!fileType) {
+      console.log(`${label}\n   ⚠️  Unsupported type ${file.mimeType} — skipped`);
+      unsupported++;
+      continue;
+    }
+    if (!force && ingestedIds.has(file.id)) {
+      skipped++;
+      continue;
+    }
+
+    const o = overrides.get(file.id);
+    const fromFolders = metaFromFolders(file.folders);
+    if (dryRun) {
+      console.log(`${label}\n   🆕 Would ingest as "${o?.title ?? titleFromFilename(file.name)}" ` +
+        `(${o?.category ?? fromFolders.category}, ${o?.municipality ?? fromFolders.municipality ?? "–"})`);
+      ingested++;
+      continue;
+    }
+    const tmpPath = path.join(tmpDir, `${file.id}.${fileType}`);
     try {
-      console.log(`\n[${ingested + skipped + failed + 1}/${FILES.length}] ${file.title}`);
-      await downloadFile(drive, file.driveId, tmpPath);
+      console.log(`\n${label}`);
+      await downloadFile(drive, file, tmpPath);
       const result = await ingestDocument(
         {
-          driveId: file.driveId,
-          title: file.title,
-          sourceUrl: `https://drive.google.com/file/d/${file.driveId}/view`,
-          category: file.category,
-          year: file.year,
-          publisher: file.publisher,
-          municipality: file.municipality,
-          fileType: "pdf",
+          driveId: file.id,
+          title: o?.title ?? titleFromFilename(file.name),
+          sourceUrl: `https://drive.google.com/file/d/${file.id}/view`,
+          category: o?.category ?? fromFolders.category ?? "annet",
+          year: o?.year,
+          publisher: o?.publisher ?? fromFolders.publisher,
+          municipality: o?.municipality ?? fromFolders.municipality,
+          fileType,
         },
         fs.readFileSync(tmpPath),
         force
@@ -636,9 +830,10 @@ async function main(): Promise<void> {
   try { fs.rmdirSync(tmpDir); } catch {}
 
   console.log(`\n✅  Sync complete`);
-  console.log(`   Ingested : ${ingested}`);
-  console.log(`   Skipped  : ${skipped} (already indexed)`);
-  console.log(`   Failed   : ${failed}\n`);
+  console.log(`   Ingested    : ${ingested}`);
+  console.log(`   Skipped     : ${skipped} (already indexed)`);
+  console.log(`   Unsupported : ${unsupported}`);
+  console.log(`   Failed      : ${failed}\n`);
 }
 
 main().catch((err) => {
