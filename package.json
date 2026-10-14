@@ -22,7 +22,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.125.0",
-    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@modelcontextprotocol/sdk": "^1.31.0",
     "@supabase/supabase-js": "^2.116.0",
     "@types/pdf-parse": "^1.1.5",
     "axios": "^1.7.0",
